@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Send a PDF file to Bedrock for summarisation
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+    Tags:
+      project: "pdf2bedrock"
+
+Resources:
+  PDFBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-pdfbucket-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+      PublicAccessBlockConfiguration:
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: project
+          Value: "pdf2bedrock"
+
+
+  PDFBucketBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PDFBucket
+      PolicyDocument:
+        Id: RequireEncryptionInTransit
+        Version: '2012-10-17'
+        Statement:
+          - Principal: '*'
+            Action: '*'
+            Effect: Deny
+            Resource:
+              - !GetAtt PDFBucket.Arn
+              - !Sub ${PDFBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+  PDF2BedrockFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Connectors:
+      S3Conn:
+        Properties:
+          Destination:
+            - Id: PDFBucket
+          Permissions:
+            - Read
+            - Write
+    Properties:
+      CodeUri: src/
+      Handler: pdf2bedrock.lambda_handler
+      Runtime: python3.13
+      MemorySize: 3008
+      Timeout: 30
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: '*'
+      Events:
+        PDFBucket:
+          Type: S3
+          Properties:
+            Bucket: !Ref PDFBucket
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
